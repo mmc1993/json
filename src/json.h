@@ -21,13 +21,8 @@ extern "C" {
 
 class Json {
 public:
-	Json() : _cjson(nullptr)
+	Json() : _cjson(nullptr), _isdel(true)
 	{ }
-
-	Json(cJSON * json) : Json()
-	{
-		FromJson(json);
-	}
 
 	Json(const STD string & buffer) : Json()
 	{
@@ -46,7 +41,10 @@ public:
 
 	~Json()
 	{
-		Remove();
+		if (_isdel)
+		{
+			Remove();
+		}
 	}
 
 	Json & operator=(Json && json)
@@ -61,18 +59,13 @@ public:
 		return *this;
 	}
 
-	bool FromJson(cJSON * json)
-	{
-		Remove();
-		_cjson = json;
-		return nullptr != _cjson;
-	}
-
 	bool FromJson(Json && json)
 	{
 		Remove();
 		_cjson = json._cjson;
+		_isdel = json._isdel;
 		json._cjson = nullptr;
+		json._isdel = false;
 		return nullptr != _cjson;
 	}
 
@@ -80,6 +73,7 @@ public:
 	{
 		Remove();
 		_cjson = Copy(json._cjson);
+		_isdel = json._isdel;
 		return nullptr != _cjson;
 	}
 
@@ -108,26 +102,10 @@ public:
 	}
 
 	template <class T>
-	Json & InsertArray(const T & val, int idx = INT_MAX)
-	{
-		ASSERT(nullptr != _cjson);
-		InsertArrayImpl<T>(idx, val);
-		return *this;
-	}
-
-	template <class T>
 	Json & InsertArray(T && val, int idx = INT_MAX)
 	{
 		ASSERT(nullptr != _cjson);
-		InsertArrayImpl<T>(idx, STD move(val));
-		return *this;
-	}
-
-	template <class T>
-	Json & InsertHash(const T & val, const STD string & key)
-	{
-		ASSERT(nullptr != _cjson);
-		InsertHashImpl<T>(key, val);
+		InsertArrayImpl<T>(idx, STD forward<T>(val));
 		return *this;
 	}
 
@@ -135,13 +113,8 @@ public:
 	Json & InsertHash(T && val, const STD string & key)
 	{
 		ASSERT(nullptr != _cjson);
-		InsertHashImpl<T>(key, STD move(val));
+		InsertHashImpl<T>(key, STD forward<T>(val));
 		return *this;
-	}
-
-	void Release()
-	{
-		_cjson = nullptr;
 	}
 
 	void Remove()
@@ -192,12 +165,12 @@ public:
 
 	Json GetValue(int idx)
 	{
-		return Json(cJSON_GetArrayItem(_cjson, idx));
+		return Json(cJSON_GetArrayItem(_cjson, idx), false);
 	}
 
 	Json GetValue(const STD string & key)
 	{
-		return Json(cJSON_GetObjectItem(_cjson, key.c_str()));
+		return Json(cJSON_GetObjectItem(_cjson, key.c_str()), false);
 	}
 
 	void ForEach(const STD function<bool (cJSON *)> & func)
@@ -211,17 +184,33 @@ public:
 	}
 
 private:
+	Json(cJSON * cjson, bool isdel) : _cjson(cjson), _isdel(isdel)
+	{ }
+
 	//	number
 	template <class T>
-	void InsertArrayImpl(int idx, typename STD enable_if<STD is_arithmetic<T>::value, T>::type val)
+	void InsertArrayImpl(int idx, typename STD enable_if<STD is_arithmetic<T>::value && !STD is_same<bool, T>::value, T>::type val)
 	{
 		cJSON_InsertItemInArray(_cjson, idx, cJSON_CreateNumber(val));
 	}
 
 	template <class T>
-	void InsertHashImpl(const STD string & key, typename STD enable_if<STD is_arithmetic<T>::value, T>::type val)
+	void InsertHashImpl(const STD string & key, typename STD enable_if<STD is_arithmetic<T>::value && !STD is_same<bool, T>::value, T>::type val)
 	{
 		cJSON_AddItemToObject(_cjson, key.c_str(), cJSON_CreateNumber(val));
+	}
+
+	//	bool
+	template <class T = bool>
+	void InsertArrayImpl(int idx, const bool & val)
+	{
+		cJSON_InsertItemInArray(_cjson, idx, cJSON_CreateBool(val));
+	}
+
+	template <class T = bool>
+	void InsertHashImpl(const STD string & key, const bool & val)
+	{
+		cJSON_AddItemToObject(_cjson, key.c_str(), cJSON_CreateBool(val));
 	}
 
 	//	const char *
@@ -250,20 +239,7 @@ private:
 		cJSON_AddItemToObject(_cjson, key.c_str(), cJSON_CreateString(val.c_str()));
 	}
 
-	//	bool
-	template <class T = bool>
-	void InsertArrayImpl(int idx, bool val)
-	{
-		cJSON_InsertItemInArray(_cjson, idx, cJSON_CreateBool(val));
-	}
-
-	template <class T = bool>
-	void InsertHashImpl(const STD string & key, bool val)
-	{
-		cJSON_AddItemToObject(_cjson, key.c_str(), cJSON_CreateBool(val));
-	}
-
-	//	json
+	//	const Json &
 	template <class T = Json>
 	void InsertArrayImpl(int idx, const Json & val)
 	{
@@ -271,16 +247,17 @@ private:
 	}
 
 	template <class T = Json>
+	void InsertHashImpl(const STD string & key, const Json & val)
+	{
+		cJSON_AddItemToObject(_cjson, key.c_str(), Copy(val._cjson));
+	}
+
+	//	Json &&
+	template <class T = Json>
 	void InsertArrayImpl(int idx, Json && val)
 	{
 		cJSON_InsertItemInArray(_cjson, idx, val._cjson);
 		val._cjson = nullptr;
-	}
-
-	template <class T = Json>
-	void InsertHashImpl(const STD string & key, const Json & val)
-	{
-		cJSON_AddItemToObject(_cjson, key.c_str(), Copy(val._cjson));
 	}
 
 	template <class T = Json>
@@ -332,6 +309,7 @@ private:
 
 private:
 	cJSON * _cjson;
+	int _isdel;
 };
 
 inline STD ostream & operator<<(STD ostream & os, const Json & json)
