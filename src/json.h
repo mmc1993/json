@@ -10,8 +10,10 @@
 #include "sformat.h"
 
 #ifdef _DEBUG
+
 //  条件判断, 抛出异常
 #define DEBUG_CHECK(exp, type, ...) if (!exp) { throw type(__VA_ARGS__); }
+
 //  异常说明, 显示Json错误位置往后20个字符
 #define DEBUG_EXPINFO(exp, string) SFormat("{0}: {1}", exp, std::string(string).substr(0, 20))
 
@@ -59,14 +61,11 @@ public:
     };
 
     template <class T>
-    struct IsCharArr: public std::false_type {};
-    template <>
-    struct IsCharArr<char *>: public std::true_type {};
-    template <int N>
-    struct IsCharArr<char[N]>: public std::true_type {};
-
-    template <class T>
     struct IsString: public std::false_type {};
+    template <>
+    struct IsString<char *>: public std::true_type {};
+    template <int N>
+    struct IsString<char[N]>: public std::true_type {};
     template <>
     struct IsString<std::string>: public std::true_type {};
 
@@ -76,7 +75,7 @@ public:
     struct IsJValue<JValue>: public std::true_type {};
 
     template <class T>
-    struct IsInteger: public std::false_type { };
+    struct IsInteger: public std::false_type {};
     template <>
     struct IsInteger<std::int8_t>: public std::true_type {};
     template <>
@@ -94,6 +93,18 @@ public:
     template <>
     struct IsInteger<std::uint64_t>: public std::true_type {};
 
+    template <class T>
+    struct IsNumber: public std::false_type {};
+    template <>
+    struct IsNumber<float>: public std::true_type {};
+    template <>
+    struct IsNumber<double>: public std::true_type {};
+
+    template <class T>
+    struct IsBool: public std::false_type {};
+    template <>
+    struct IsBool<bool>: public std::true_type {};
+
     static JValue FromFile(const std::string & fname)
     {
         std::ifstream ifile(fname);
@@ -106,22 +117,25 @@ public:
 
     static JValue FromString(const std::string & string)
     {
-        return std::move(JValue(string));
+        JValue jvalue;
+        try
+        {
+            Parser::Parse(string.c_str(), &jvalue);
+        }
+        catch (const Parser::Exception & error)
+        {
+            jvalue.Set(nullptr);
+        }
+        return std::move(jvalue);
     }
 
     JValue(): _type(JType::kNULL)
     { }
 
-    JValue(const std::string & string)
+    template <class T>
+    JValue(T && value)
     {
-        try
-        {
-            Parser::Parse(string.c_str(), this);
-        }
-        catch (const Parser::Exception & error)
-        {
-            _type = kNULL;
-        }
+        Set(std::forward(value));
     }
 
     JValue(const JValue & json)
@@ -200,65 +214,17 @@ public:
         return GetImpl(keys...);
     }
 
-    //template <class ...Keys>
-    //bool Set(std::int8_t val, const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
-    //}
+    template <class T, class ...Keys>
+    bool Set(const T & val, const Keys & ...keys)
+    {
+        return SetImpl(std::make_shared<JValue>(val), keys...);
+    }
 
-    //template <class ...Keys>
-    //bool Set(std::int16_t val, const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
-    //}
-
-    //template <class ...Keys>
-    //bool Set(std::int32_t val, const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
-    //}
-
-    //template <class ...Keys>
-    //bool Set(std::int64_t val, const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
-    //}
-
-    //template <class ...Keys>
-    //bool Set(float val, const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
-    //}
-
-    //template <class ...Keys>
-    //bool Set(double val, const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
-    //}
-
-    //template <class ...Keys>
-    //bool Set(const char * val, const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateString(val), keys...);
-    //}
-
-    //template <class ...Keys>
-    //bool Set(const std::string & val, const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateString(val.c_str()), keys...);
-    //}
-
-    //template <class ...Keys>
-    //bool SetList(const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateArray(), keys...);
-    //}
-
-    //template <class ...Keys>
-    //bool SetHash(const Keys & ...keys)
-    //{
-    //    return SetImpl(_cjson, cJSON_CreateObject(), keys...);
-    //}
+    template <class ...Keys>
+    bool Set(const char * val, const Keys & ...keys)
+    {
+        return SetImpl(std::make_shared<JValue>(val), keys...);
+    }
 
 private:
     JValue Clone(const JValue jvalue) const
@@ -312,113 +278,117 @@ private:
     template <class Key>
     JValuePtr GetImpl(const Key & key)
     {
+        if constexpr (IsJValue<Key>::value)
+        {
+            return key._cjson;
+        }
         if constexpr (IsInteger<Key>::value)
         {
             return _elements.at(key);
-        }
-        if constexpr (IsCharArr<Key>::value)
-        {
-            return *std::find(std::begin(_elements), std::end(_elements), key);
         }
         if constexpr (IsString<Key>::value)
         {
             return *std::find(std::begin(_elements), std::end(_elements), key);
         }
-        if constexpr (IsJValue<Key>::value)
-        {
-            return key._cjson;
-        }
         return nullptr;
     }
 
-    //template <class Key1, class Key2, class ...Keys>
-    //bool SetImpl(cJSON * root, cJSON * val, const Key1 & key1, const Key2 & key2, const Keys & ...keys)
-    //{
-    //    if constexpr (IsJValue<Key1>::value)
-    //    {
-    //        return SetImpl(key1._cjson, val, key2, keys...);
-    //    }
-    //    if constexpr (!IsJValue<Key1>::value)
-    //    {
-    //        return SetImpl(GetImpl(root, key1), val, key2, keys...);
-    //    }
-    //}
+    template <class Key1, class Key2, class ...Keys>
+    bool SetImpl(cJSON * root, cJSON * val, const Key1 & key1, const Key2 & key2, const Keys & ...keys)
+    {
+        if constexpr (IsJValue<Key1>::value)
+        {
+            return SetImpl(key1._cjson, val, key2, keys...);
+        }
+        if constexpr (!IsJValue<Key1>::value)
+        {
+            return SetImpl(GetImpl(root, key1), val, key2, keys...);
+        }
+    }
 
-    //template <class Key1, class Key2>
-    //bool SetImpl(cJSON * root, cJSON * val, const Key1 & key1, const Key2 & key2)
-    //{
-    //    root = GetImpl(root, key1);
-    //    if constexpr (IsInteger<Key2>::value)
-    //    {
-    //        if (!cJSON_IsArray(root)) { return false; }
-    //        if (key2 >= cJSON_GetArraySize(root))
-    //        {
-    //            cJSON_AddItemToArray(root, val);
-    //        }
-    //        else
-    //        {
-    //            cJSON_DeleteItemFromArray(root, key2);
-    //            cJSON_InsertItemInArray(root, key2, val);
-    //        }
-    //    }
-    //    if constexpr (IsString<Key2>::value)
-    //    {
-    //        if (!cJSON_IsObject(root)) { return false; }
-    //        cJSON_DeleteItemFromObject(root, key2.c_str());
-    //        cJSON_AddItemToObject(root, key2.c_str(), val);
-    //    }
-    //    if constexpr (IsCharArr<Key2>::value)
-    //    {
-    //        if (!cJSON_IsObject(root)) { return false; }
-    //        cJSON_DeleteItemFromObject(root, key2);
-    //        cJSON_AddItemToObject(root, key2, val);
-    //    }
-    //    return true;
-    //}
+    template <class Value, class Key>
+    bool SetImpl(const Value & val, const Key & key)
+    {
+        auto jptr = GetImpl(key);
+        if (jptr == nullptr)
+        {
+            if constexpr (IsString<Key>::value)
+            {
+                auto newval = std::make_shared<JValue>(val);
+                newval->_key = key;
+                _elements.push(newval);
+            }
+            if constexpr (IsInteger<Key>::value)
+            {
+                _elements.push(std::make_shared<JValue>(val));
+            }
+        }
+        else
+        {
+            jptr* = val;
+        }
 
-    //template <class Key>
-    //bool SetImpl(cJSON * root, cJSON * val, const Key & key)
-    //{
-    //    assert(root == _cjson);
-    //    if constexpr (IsInteger<Key>::value)
-    //    {
-    //        if (!cJSON_IsArray(_cjson))
-    //        {
-    //            RemoveThis();
-    //            _cjson = cJSON_CreateArray();
-    //        }
-    //        if (key >= cJSON_GetArraySize(_cjson))
-    //        {
-    //            cJSON_AddItemToArray(_cjson, val);
-    //        }
-    //        else
-    //        {
-    //            cJSON_DeleteItemFromArray(_cjson, key);
-    //            cJSON_InsertItemInArray(_cjson, key, val);
-    //        }
-    //    }
-    //    if constexpr (IsString<Key>::value)
-    //    {
-    //        if (!cJSON_IsObject(_cjson))
-    //        {
-    //            RemoveThis();
-    //            _cjson = cJSON_CreateObject();
-    //        }
-    //        cJSON_DeleteItemFromObject(_cjson, key.c_str());
-    //        cJSON_AddItemToObject(_cjson, key.c_str(), val);
-    //    }
-    //    if constexpr (IsCharArr<Key>::value)
-    //    {
-    //        if (!cJSON_IsObject(_cjson))
-    //        {
-    //            RemoveThis();
-    //            _cjson = cJSON_CreateObject();
-    //        }
-    //        cJSON_DeleteItemFromObject(_cjson, key);
-    //        cJSON_AddItemToObject(_cjson, key, val);
-    //    }
-    //    return true;
-    //}
+        if constexpr (IsInteger<Key>::value)
+        {
+        }
+        if constexpr (IsString<Key>::value)
+        {
+
+        }
+        root = GetImpl(root, key1);
+        if constexpr (IsInteger<Key2>::value)
+        {
+            if (!cJSON_IsArray(root)) { return false; }
+            if (key2 >= cJSON_GetArraySize(root))
+            {
+                cJSON_AddItemToArray(root, val);
+            }
+            else
+            {
+                cJSON_DeleteItemFromArray(root, key2);
+                cJSON_InsertItemInArray(root, key2, val);
+            }
+        }
+        if constexpr (IsString<Key2>::value)
+        {
+            if (!cJSON_IsObject(root)) { return false; }
+            cJSON_DeleteItemFromObject(root, key2.c_str());
+            cJSON_AddItemToObject(root, key2.c_str(), val);
+        }
+        if constexpr (IsCharArr<Key2>::value)
+        {
+            if (!cJSON_IsObject(root)) { return false; }
+            cJSON_DeleteItemFromObject(root, key2);
+            cJSON_AddItemToObject(root, key2, val);
+        }
+        return true;
+    }
+
+    bool SetImpl(const JValuePtr & value)
+    {
+
+        //  TODO
+        //if constexpr (IsInteger<Value>::value || IsNumber<Value>::value)
+        //{
+        //    _type = kNUMBER;
+        //    _number = value;
+        //}
+        //if constexpr (IsString<Value>::value)
+        //{
+        //    _type = kSTRING;
+        //    _string = value;
+        //}
+        //if constexpr (IsBool<Value>::value)
+        //{
+        //    _type = kBOOL;
+        //    _number = value != 0;
+        //}
+        //if constexpr (IsJValue<Value>::value)
+        //{
+        //    *this = value;
+        //}
+        return true;
+    }
 
     const std::string & Print() const;
 
