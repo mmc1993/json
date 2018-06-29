@@ -23,6 +23,8 @@
 /* cJSON */
 /* JSON parser in C. */
 
+#define _CRT_SECURE_NO_WARNINGS
+
 #ifdef __GNUC__
 #pragma GCC visibility push(default)
 #endif

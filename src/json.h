@@ -4,6 +4,7 @@ extern "C" {
 #include "cJSON.h"
 }
 
+#include <tuple>
 #include <string>
 #include <cassert>
 #include <fstream>
@@ -11,309 +12,493 @@ extern "C" {
 #include <algorithm>
 #include <functional>
 
-#ifndef STD
-#define STD	std::
-#endif
-
-#ifndef ASSERT
-#define ASSERT(cod) assert(cod)
-#endif
-
 class Json {
 public:
-	Json() : _cjson(nullptr), _isdel(true)
-	{ }
+    enum ValueType {
+        kBOOLEAN,
+        kNUMBER,
+        kSTRING,
+        kOBJECT,
+        kARRAY,
+        kNULL,
+    };
 
-	Json(const STD string & buffer) : Json()
-	{
-		FromBuffer(buffer);
-	}
+    class Value {
+    public:
+        Value(): _cjson(nullptr)
+        { }
 
-	Json(Json && json) : Json()
-	{
-		FromJson(STD move(json));
-	}
+        Value(cJSON * cjson): _cjson(cjson)
+        { }
 
-	Json(const Json & json) : Json()
-	{ 
-		FromJson(json);
-	}
+        ValueType Type() const
+        {
+            switch (_cjson->type)
+            {
+            case cJSON_Number:
+                return kNUMBER;
+            case cJSON_String:
+                return kSTRING;
+            case cJSON_Object:
+                return kOBJECT;
+            case cJSON_Array:
+                return kARRAY;
+            case cJSON_True:
+            case cJSON_False:
+                return kBOOLEAN;
+            }
+            return kNULL;
+        }
 
-	~Json()
-	{
-		if (_isdel)
-		{
-			Remove();
-		}
-	}
+        int ToInt() const
+        {
+            return static_cast<int>(_cjson->valuedouble);
+        }
 
-	Json & operator=(Json && json)
-	{
-		FromJson(STD move(json));
-		return *this;
-	}
+        float ToFloat() const
+        {
+            return static_cast<float>(_cjson->valuedouble);
+        }
 
-	Json & operator=(const Json & json)
-	{
-		FromJson(json);
-		return *this;
-	}
+        double ToDouble() const
+        {
+            return _cjson->valuedouble;
+        }
 
-	bool FromJson(Json && json)
-	{
-		Remove();
-		_cjson = json._cjson;
-		_isdel = json._isdel;
-		json._cjson = nullptr;
-		json._isdel = false;
-		return nullptr != _cjson;
-	}
+        bool ToBool() const
+        {
+            return _cjson->valueint != 0;
+        }
 
-	bool FromJson(const Json & json)
-	{
-		Remove();
-		_cjson = Copy(json._cjson);
-		_isdel = json._isdel;
-		return nullptr != _cjson;
-	}
+        std::string ToString() const
+        {
+            return _cjson->valuestring;
+        }
 
-	bool FromFile(const STD string & fname)
-	{
-		Remove();
-		STD ifstream ifile(fname);
-		STD string buffer;
-		STD copy(STD istream_iterator<char>(ifile), 
-				STD istream_iterator<char>(), 
-				STD back_inserter(buffer));
-		return FromBuffer(buffer);
-	}
+        const char * Key() const
+        {
+            return _cjson->string;
+        }
 
-	bool FromBuffer(const STD string & buffer)
-	{
-		Remove();
-		_cjson = cJSON_Parse(buffer.c_str());
-		return nullptr != _cjson;
-	}
+        void ForList(const std::function<void(const size_t idx, Value &)> & func)
+        {
+            for (auto i = 0; i != cJSON_GetArraySize(_cjson); ++i)
+            {
+                Value value(cJSON_GetArrayItem(_cjson, i));
+                func(i, value);
+            }
+        }
 
-	int GetType()
-	{
-		ASSERT(nullptr != _cjson);
-		return _cjson->type;
-	}
+        void ForHash(const std::function<void(const char * key, Value &)> & func)
+        {
+            for (auto i = 0; i != cJSON_GetArraySize(_cjson); ++i)
+            {
+                Value value(cJSON_GetArrayItem(_cjson, i));
+                func(value.Key(), value);
+            }
+        }
 
-	template <class T>
-	Json & InsertArray(T && val, int idx = INT_MAX)
-	{
-		ASSERT(nullptr != _cjson);
-		InsertArrayImpl<T>(idx, STD forward<T>(val));
-		return *this;
-	}
+    private:
+        cJSON * _cjson;
 
-	template <class T>
-	Json & InsertHash(T && val, const STD string & key)
-	{
-		ASSERT(nullptr != _cjson);
-		InsertHashImpl<T>(key, STD forward<T>(val));
-		return *this;
-	}
+        friend class Json;
+    };
 
-	void Remove()
-	{
-		cJSON_Delete(_cjson);
-		_cjson = nullptr;
-	}
+    template <class T>
+    struct IsCharArr: public std::false_type {};
+    template <>
+    struct IsCharArr<char *>: public std::true_type {};
+    template <int N>
+    struct IsCharArr<char[N]>: public std::true_type {};
 
-	void Remove(int idx)
-	{
-		cJSON_DeleteItemFromArray(_cjson, idx);
-	}
+    template <class T>
+    struct IsString: public std::false_type {};
+    template <>
+    struct IsString<std::string>: public std::true_type {};
 
-	void Remove(const STD string & key)
-	{
-		cJSON_DeleteItemFromObject(_cjson, key.c_str());
-	}
+    template <class T>
+    struct IsValue: public std::false_type {};
+    template <>
+    struct IsValue<Value>: public std::true_type {};
 
-	bool ToBool()
-	{
-		ASSERT(cJSON_True == _cjson->type || cJSON_False == _cjson->type);
-		return 0 != _cjson->valueint;
-	}
+    template <class T>
+    struct IsInteger: public std::false_type { };
+    template <>
+    struct IsInteger<std::int8_t>: public std::true_type {};
+    template <>
+    struct IsInteger<std::int16_t>: public std::true_type {};
+    template <>
+    struct IsInteger<std::int32_t>: public std::true_type {};
+    template <>
+    struct IsInteger<std::int64_t>: public std::true_type {};
+    template <>
+    struct IsInteger<std::uint8_t>: public std::true_type {};
+    template <>
+    struct IsInteger<std::uint16_t>: public std::true_type {};
+    template <>
+    struct IsInteger<std::uint32_t>: public std::true_type {};
+    template <>
+    struct IsInteger<std::uint64_t>: public std::true_type {};
 
-	int ToInt()
-	{
-		ASSERT(cJSON_Number == _cjson->type);
-		return _cjson->valueint;
-	}
+    static Json FromFile(const std::string & fname)
+    {
+        std::ifstream ifile(fname);
+        std::string buffer;
+        std::copy(std::istream_iterator<char>(ifile), 
+                std::istream_iterator<char>(), 
+                std::back_inserter(buffer));
+        return std::move(FromString(buffer));
+    }
 
-	float ToFloat()
-	{
-		ASSERT(cJSON_Number == _cjson->type);
-		return (float)_cjson->valuedouble;
-	}
+    static Json FromString(const std::string & string)
+    {
+        Json json;
+        json._cjson = cJSON_Parse(string.c_str());
+        return std::move(json);
+    }
 
-	double ToDouble()
-	{
-		ASSERT(cJSON_Number == _cjson->type);
-		return _cjson->valuedouble;
-	}
+    Json(const std::string & string)
+    {
+        _cjson = cJSON_Parse(string.c_str());
+    }
 
-	STD string ToString()
-	{
-		ASSERT(cJSON_String == _cjson->type);
-		return _cjson->valuestring;
-	}
+    Json(): _cjson(nullptr)
+    { }
 
-	Json GetValue(int idx)
-	{
-		return Json(cJSON_GetArrayItem(_cjson, idx), false);
-	}
+    Json(const Json & json): _cjson(nullptr)
+    {
+        *this = json;
+    }
 
-	Json GetValue(const STD string & key)
-	{
-		return Json(cJSON_GetObjectItem(_cjson, key.c_str()), false);
-	}
+    Json(Json && json): _cjson(nullptr)
+    {
+        *this = std::move(json);
+    }
 
-	void ForEach(const STD function<bool (cJSON *)> & func)
-	{
-		for (auto ele = _cjson->child; ele != nullptr && func(ele); ele = ele->next);
-	}
+    ~Json()
+    {
+        RemoveThis();
+    }
 
-	STD string Print() const
-	{
-		return STD string(cJSON_Print(_cjson));
-	}
+    Json & operator =(const Json & json)
+    {
+        RemoveThis();
+        _cjson = CloneThis(json._cjson);
+    }
+
+    Json & operator =(Json && json)
+    {
+        RemoveThis();
+        _cjson = json._cjson;
+        json._cjson = nullptr;
+        return *this;
+    }
+
+    std::string ToString()
+    {
+        return std::string(cJSON_Print(_cjson));
+    }
+
+    template <class ...Keys>
+    Value Get(const Keys & ...keys)
+    {
+        return Value(GetImpl(_cjson, keys...));
+    }
+
+    //template <class ...Keys>
+    //void Del(std::int8_t idx, const Keys & ...keys)
+    //{
+    //    DelImpl(idx, keys...);
+    //}
+
+    //template <class ...Keys>
+    //void Del(std::int16_t idx, const Keys & ...keys)
+    //{
+    //    DelImpl(idx, keys...);
+    //}
+
+    //template <class ...Keys>
+    //void Del(std::int32_t idx, const Keys & ...keys)
+    //{
+    //    DelImpl(idx, keys...);
+    //}
+
+    //template <class ...Keys>
+    //void Del(std::int64_t idx, const Keys & ...keys)
+    //{
+    //    DelImpl(idx, keys...);
+    //}
+
+    //template <class ...Keys>
+    //void Del(const char * key, const Keys & ...keys)
+    //{
+    //    DelImpl(key, keys...);
+    //}
+
+    //template <class ...Keys>
+    //void Del(const std::string & key, const Keys & ...keys)
+    //{
+    //    DelImpl(key, keys...);
+    //}
+
+    template <class ...Keys>
+    bool Set(std::int8_t val, const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
+    }
+
+    template <class ...Keys>
+    bool Set(std::int16_t val, const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
+    }
+
+    template <class ...Keys>
+    bool Set(std::int32_t val, const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
+    }
+
+    template <class ...Keys>
+    bool Set(std::int64_t val, const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
+    }
+
+    template <class ...Keys>
+    bool Set(float val, const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
+    }
+
+    template <class ...Keys>
+    bool Set(double val, const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateNumber(static_cast<double>(val)), keys...);
+    }
+
+    template <class ...Keys>
+    bool Set(const char * val, const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateString(val), keys...);
+    }
+
+    template <class ...Keys>
+    bool Set(const std::string & val, const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateString(val.c_str()), keys...);
+    }
+
+    template <class ...Keys>
+    bool SetList(const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateArray(), keys...);
+    }
+
+    template <class ...Keys>
+    bool SetHash(const Keys & ...keys)
+    {
+        return SetImpl(_cjson, cJSON_CreateObject(), keys...);
+    }
 
 private:
-	Json(cJSON * cjson, bool isdel) : _cjson(cjson), _isdel(isdel)
-	{ }
+    void RemoveThis()
+    {
+        if (_cjson != nullptr)
+        {
+            cJSON_Delete(_cjson);
+            _cjson = nullptr;
+        }
+    }
 
-	//	number
-	template <class T>
-	void InsertArrayImpl(int idx, typename STD enable_if<STD is_arithmetic<T>::value && !STD is_same<bool, T>::value, T>::type val)
-	{
-		cJSON_InsertItemInArray(_cjson, idx, cJSON_CreateNumber(val));
-	}
+    cJSON * CloneThis(cJSON * parent)
+    {
+        cJSON * cjson = nullptr;
+        if (cJSON_Number == parent->type)
+        {
+            cjson = cJSON_CreateNumber(parent->valuedouble);
+        }
+        else if (cJSON_String == parent->type)
+        {
+            cjson = cJSON_CreateString(parent->valuestring);
+        }
+        else if (cJSON_False == parent->type)
+        {
+            cjson = cJSON_CreateFalse();
+        }
+        else if (cJSON_True == parent->type)
+        {
+            cjson = cJSON_CreateTrue();
+        }
+        else if (cJSON_Array == parent->type)
+        {
+            cjson = cJSON_CreateArray();
+            for (auto ele = parent->child; ele != nullptr; ele = ele->next)
+            {
+                cJSON_AddItemToArray(cjson, CloneThis(ele));
+            }
+        }
+        else if (cJSON_Object == parent->type)
+        {
+            cjson = cJSON_CreateObject();
+            for (auto ele = parent->child; ele != nullptr; ele = ele->next)
+            {
+                cJSON_AddItemToObject(cjson, ele->string, CloneThis(ele));
+            }
+        }
+        assert(nullptr != cjson);
+        return cjson;
+    }
 
-	template <class T>
-	void InsertHashImpl(const STD string & key, typename STD enable_if<STD is_arithmetic<T>::value && !STD is_same<bool, T>::value, T>::type val)
-	{
-		cJSON_AddItemToObject(_cjson, key.c_str(), cJSON_CreateNumber(val));
-	}
+    template <class Key, class ...Keys>
+    cJSON * GetImpl(cJSON * cjson, const Key & key, const Keys & ...keys)
+    {
+        cjson = GetImpl(cjson, key);
+        if (cjson != nullptr)
+        {
+            return GetImpl(cjson, keys...);
+        }
+        return nullptr;
+    }
 
-	//	bool
-	template <class T = bool>
-	void InsertArrayImpl(int idx, const bool & val)
-	{
-		cJSON_InsertItemInArray(_cjson, idx, cJSON_CreateBool(val));
-	}
+    template <class Key>
+    cJSON * GetImpl(cJSON * cjson, const Key & key)
+    {
+        if (cjson != nullptr)
+        {
+            if constexpr (IsCharArr<Key>::value)
+            {
+                return cJSON_GetObjectItem(cjson, key);
+            }
+            if constexpr (IsInteger<Key>::value)
+            {
+                return cJSON_GetArrayItem(cjson, key);
+            }
+            if constexpr (IsString<Key>::value)
+            {
+                return cJSON_GetObjectItem(cjson, key.c_str());
+            }
+            if constexpr (IsValue<Key>::value)
+            {
+                return key._cjson;
+            }
+        }
+        return nullptr;
+    }
 
-	template <class T = bool>
-	void InsertHashImpl(const STD string & key, const bool & val)
-	{
-		cJSON_AddItemToObject(_cjson, key.c_str(), cJSON_CreateBool(val));
-	}
+    template <class Key1, class Key2, class ...Keys>
+    bool SetImpl(cJSON * root, cJSON * val, const Key1 & key1, const Key2 & key2, const Keys & ...keys)
+    {
+        if constexpr (IsValue<Key1>::value)
+        {
+            return SetImpl(key1._cjson, val, key2, keys...);
+        }
+        if constexpr (!IsValue<Key1>::value)
+        {
+            return SetImpl(GetImpl(root, key1), val, key2, keys...);
+        }
+    }
 
-	//	const char *
-	template <class T = char>
-	void InsertArrayImpl(int idx, const char * val)
-	{
-		cJSON_InsertItemInArray(_cjson, idx, cJSON_CreateString(val));
-	}
+    template <class Key1, class Key2>
+    bool SetImpl(cJSON * root, cJSON * val, const Key1 & key1, const Key2 & key2)
+    {
+        root = GetImpl(root, key1);
+        if constexpr (IsInteger<Key2>::value)
+        {
+            if (!cJSON_IsArray(root)) { return false; }
+            if (key2 >= cJSON_GetArraySize(root))
+            {
+                cJSON_AddItemToArray(root, val);
+            }
+            else
+            {
+                cJSON_DeleteItemFromArray(root, key2);
+                cJSON_InsertItemInArray(root, key2, val);
+            }
+        }
+        if constexpr (IsString<Key2>::value)
+        {
+            if (!cJSON_IsObject(root)) { return false; }
+            cJSON_DeleteItemFromObject(root, key2.c_str());
+            cJSON_AddItemToObject(root, key2.c_str(), val);
+        }
+        if constexpr (IsCharArr<Key2>::value)
+        {
+            if (!cJSON_IsObject(root)) { return false; }
+            cJSON_DeleteItemFromObject(root, key2);
+            cJSON_AddItemToObject(root, key2, val);
+        }
+        return true;
+    }
 
-	template <class T = char>
-	void InsertHashImpl(const STD string & key, const char * val)
-	{
-		cJSON_AddItemToObject(_cjson, key.c_str(), cJSON_CreateString(val));
-	}
-
-	//	string
-	template <class T = STD string>
-	void InsertArrayImpl(int idx, const STD string & val)
-	{
-		cJSON_InsertItemInArray(_cjson, idx, cJSON_CreateString(val.c_str()));
-	}
-
-	template <class T = STD string>
-	void InsertHashImpl(const STD string & key, const STD string & val)
-	{
-		cJSON_AddItemToObject(_cjson, key.c_str(), cJSON_CreateString(val.c_str()));
-	}
-
-	//	const Json &
-	template <class T = Json>
-	void InsertArrayImpl(int idx, const Json & val)
-	{
-		cJSON_InsertItemInArray(_cjson, idx, Copy(val._cjson));
-	}
-
-	template <class T = Json>
-	void InsertHashImpl(const STD string & key, const Json & val)
-	{
-		cJSON_AddItemToObject(_cjson, key.c_str(), Copy(val._cjson));
-	}
-
-	//	Json &&
-	template <class T = Json>
-	void InsertArrayImpl(int idx, Json && val)
-	{
-		cJSON_InsertItemInArray(_cjson, idx, val._cjson);
-		val._cjson = nullptr;
-	}
-
-	template <class T = Json>
-	void InsertHashImpl(const STD string & key, Json && val)
-	{
-		cJSON_AddItemToObject(_cjson, key.c_str(), val._cjson);
-		val._cjson = nullptr;
-	}
-
-	cJSON * Copy(cJSON * parent) const
-	{
-		ASSERT(nullptr != parent);
-		cJSON * cjson = nullptr;
-		if (cJSON_Number == parent->type)
-		{
-			cjson = cJSON_CreateNumber(parent->valuedouble);
-		}
-		else if (cJSON_String == parent->type)
-		{
-			cjson = cJSON_CreateString(parent->valuestring);
-		}
-		else if (cJSON_False == parent->type)
-		{
-			cjson = cJSON_CreateFalse();
-		}
-		else if (cJSON_True == parent->type)
-		{
-			cjson = cJSON_CreateTrue();
-		}
-		else if (cJSON_Array == parent->type)
-		{
-			cjson = cJSON_CreateArray();
-			for (auto ele = parent->child; ele != nullptr; ele = ele->next)
-			{
-				cJSON_AddItemToArray(cjson, Copy(ele));
-			}
-		}
-		else if (cJSON_Object == parent->type)
-		{
-			cjson = cJSON_CreateObject();
-			for (auto ele = parent->child; ele != nullptr; ele = ele->next)
-			{
-				cJSON_AddItemToObject(cjson, ele->string, Copy(ele));
-			}
-		}
-		ASSERT(nullptr != cjson);
-		return cjson;
-	}
+    template <class Key>
+    bool SetImpl(cJSON * root, cJSON * val, const Key & key)
+    {
+        assert(root == _cjson);
+        if constexpr (IsInteger<Key>::value)
+        {
+            if (!cJSON_IsArray(_cjson))
+            {
+                RemoveThis();
+                _cjson = cJSON_CreateArray();
+            }
+            if (key >= cJSON_GetArraySize(_cjson))
+            {
+                cJSON_AddItemToArray(_cjson, val);
+            }
+            else
+            {
+                cJSON_DeleteItemFromArray(_cjson, key);
+                cJSON_InsertItemInArray(_cjson, key, val);
+            }
+        }
+        if constexpr (IsString<Key>::value)
+        {
+            if (!cJSON_IsObject(_cjson))
+            {
+                RemoveThis();
+                _cjson = cJSON_CreateObject();
+            }
+            cJSON_DeleteItemFromObject(_cjson, key.c_str());
+            cJSON_AddItemToObject(_cjson, key.c_str(), val);
+        }
+        if constexpr (IsCharArr<Key>::value)
+        {
+            if (!cJSON_IsObject(_cjson))
+            {
+                RemoveThis();
+                _cjson = cJSON_CreateObject();
+            }
+            cJSON_DeleteItemFromObject(_cjson, key);
+            cJSON_AddItemToObject(_cjson, key, val);
+        }
+        return true;
+    }
+    
+    //template <class Key, class ...Keys>
+    //void DelImpl(Key && key, const Keys & ...keys)
+    //{
+    //    auto root = GetImpl(_cjson, keys...);
+    //    if (root != nullptr)
+    //    {
+    //        if constexpr (IsString<Key>::value)
+    //        {
+    //            assert(cJSON_IsObject(cjson));
+    //            cJSON_DeleteItemFromObject(root, key.c_str());
+    //        }
+    //        if constexpr (IsCharArr<Key>::value)
+    //        {
+    //            assert(cJSON_IsObject(cjson));
+    //            cJSON_DeleteItemFromObject(root, key);
+    //        }
+    //        if constexpr (IsInteger<Key>::value)
+    //        {
+    //            assert(cJSON_IsArray(cjson));
+    //            cJSON_DeleteItemFromArray(root, key);
+    //        }
+    //    }
+    //}
 
 private:
-	cJSON * _cjson;
-	int _isdel;
+    cJSON * _cjson;
 };
-
-inline STD ostream & operator<<(STD ostream & os, const Json & json)
-{
-	os << json.Print();
-	return os;
-}
