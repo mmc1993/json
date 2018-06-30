@@ -112,9 +112,79 @@ const char * JValue::Parser::Parse(const char * string, JValue * output)
     return string;
 }
 
-
-const std::string & JValue::Print() const
+std::string JValue::Print(std::string & space) const
 {
-    // TODO: 在此处插入 return 语句
-    return std::string();
+    switch (Type())
+    {
+    case kNUMBER:
+        {
+            return std::to_string(_number);
+        }
+        break;
+    case kSTRING:
+        {
+            return "\"" + _string + "\"";
+        }
+        break;
+    case kHASH:
+        {
+            std::vector<std::string> strings;
+            std::string resule("{\n");
+            space.append("\t");
+            resule.append(space);
+            for (const auto & element : _elements)
+            {
+                strings.push_back(SFormat("\"{0}\": {1}", 
+                    element->Key(), element->Print(space)));
+            }
+            resule.append(PrintJoin(strings, ",\n" + space));
+            space.pop_back();
+            resule.append("\n");
+            resule.append(space);
+            resule.append("}");
+            return std::move(resule);
+        }
+        break;
+    case kLIST:
+        {
+            std::vector<std::string> strings;
+            for (const auto & element : _elements)
+            {
+                strings.push_back(element->Print(space));
+            }
+            return "[" + PrintJoin(strings, ", ") + "]";
+        }
+        break;
+    case kBOOL:
+        {
+            return ToBool() ? "\"true\"" : "\"false\"";
+        }
+        break;
+    }
+    return "null";
+}
+
+std::string JValue::PrintJoin(const std::vector<std::string>& strings, const std::string & join) const
+{
+    size_t count = 0;
+    for (const auto & string : strings)
+    {
+        count += string.size();
+    }
+
+    std::string resule;
+    resule.reserve(count);
+
+    if (!strings.empty())
+    {
+        resule.append(strings.at(0));
+
+        for (auto i = 1; i != strings.size(); ++i)
+        {
+            resule.append(join);
+            resule.append(strings.at(i));
+        }
+    }
+
+    return resule;
 }

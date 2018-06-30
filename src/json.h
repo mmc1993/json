@@ -209,9 +209,35 @@ public:
         return _string;
     }
 
-    const std::string & ToPrint() const
+    std::string ToPrint() const
     {
-        return Print();
+        std::string space;
+        return std::move(Print(space));
+    }
+
+    size_t GetCount() const
+    {
+        return _elements.size();
+    }
+
+    std::vector<JValuePtr>::const_iterator begin() const
+    {
+        return _elements.begin();
+    }
+
+    std::vector<JValuePtr>::iterator begin()
+    {
+        return _elements.begin();
+    }
+
+    std::vector<JValuePtr>::const_iterator end() const
+    {
+        return _elements.end();
+    }
+
+    std::vector<JValuePtr>::iterator end()
+    {
+        return _elements.end();
     }
 
     template <class ...Keys>
@@ -300,7 +326,7 @@ private:
     {
         if constexpr (IsInteger<Key>::value)
         {
-            return key < _elements.size()
+            return (size_t)key < _elements.size()
                 ? _elements.at(key)
                 : nullptr;
         }
@@ -327,7 +353,8 @@ private:
     template <class Val, class Key>
     bool SetImpl(Val && val, const Key & key)
     {
-        assert(Type() == kHASH || Type() == kLIST);
+        if constexpr (IsString<Key>::value) { assert(Type() == kHASH); }
+        if constexpr (IsInteger<Key>::value) { assert(Type() == kLIST); }
         auto jptr = GetImpl(key);
         if (jptr == nullptr)
         {
@@ -420,7 +447,9 @@ private:
         }
     }
 
-    const std::string & Print() const;
+    std::string Print(std::string & space) const;
+
+    std::string PrintJoin(const std::vector<std::string> & strings, const std::string & join) const;
 
 private:
     std::vector<JValuePtr> _elements;
