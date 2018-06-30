@@ -50,10 +50,14 @@ int main()
     //                                                  json.Get(value, "k").ToString()) << std::endl;
                              //});
 
-    JValue json(R"({
-    "123": [0, 1]
-})");
-    json.Get("123", 1);
+    const std::string s;
+    JValue json = JValue::FromString(R"({
+        "123": [0, 1]
+    })");
+    json.Set(JValue::List(), "list");
+    json.Set(JValue::Hash(), "hash");
+    json.Del("123");
+    json.Del("123");
     std::cin.get();
     //json.Get("int").ToInt();
     //json.Get("float").ToFloat();

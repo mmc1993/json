@@ -7,6 +7,7 @@
 #include <iterator>
 #include <algorithm>
 #include <functional>
+#include <type_traits>
 #include "sformat.h"
 
 #ifdef _DEBUG
@@ -60,6 +61,30 @@ public:
         kNULL,
     };
 
+    struct Hash {};
+    struct List {};
+
+    //  如果是C++20, 可去掉这个模板
+    template <class T>
+    struct remove_cvref {
+        using type = std::remove_cv_t<std::remove_reference_t<T>>;
+    };
+
+    template <class T>
+    using IsHash = std::is_same<T, Hash>;
+
+    template <class T>
+    using IsList = std::is_same<T, List>;
+
+    template <class T>
+    using IsBool = std::is_same<T, bool>;
+
+    template <class T>
+    using IsJValue = std::is_same<T, JValue>;
+
+    template <class T>
+    using IsNull = std::is_same<T, nullptr_t>;
+
     template <class T>
     struct IsString: public std::false_type {};
     template <>
@@ -70,9 +95,11 @@ public:
     struct IsString<std::string>: public std::true_type {};
 
     template <class T>
-    struct IsJValue: public std::false_type {};
+    struct IsNumber: public std::false_type {};
     template <>
-    struct IsJValue<JValue>: public std::true_type {};
+    struct IsNumber<float>: public std::true_type {};
+    template <>
+    struct IsNumber<double>: public std::true_type {};
 
     template <class T>
     struct IsInteger: public std::false_type {};
@@ -93,18 +120,6 @@ public:
     template <>
     struct IsInteger<std::uint64_t>: public std::true_type {};
 
-    template <class T>
-    struct IsNumber: public std::false_type {};
-    template <>
-    struct IsNumber<float>: public std::true_type {};
-    template <>
-    struct IsNumber<double>: public std::true_type {};
-
-    template <class T>
-    struct IsBool: public std::false_type {};
-    template <>
-    struct IsBool<bool>: public std::true_type {};
-
     static JValue FromFile(const std::string & fname)
     {
         std::ifstream ifile(fname);
@@ -122,7 +137,7 @@ public:
         {
             Parser::Parse(string.c_str(), &jvalue);
         }
-        catch (const Parser::Exception & error)
+        catch (const Parser::Exception &)
         {
             jvalue.Set(nullptr);
         }
@@ -135,12 +150,7 @@ public:
     template <class T>
     JValue(T && value)
     {
-        Set(std::forward(value));
-    }
-
-    JValue(const JValue & json)
-    {
-        *this = json;
+        Set(std::forward<T>(value));
     }
 
     JValue(JValue && json)
@@ -150,12 +160,7 @@ public:
 
     JValue & operator =(const JValue & json)
     {
-        _elements = json._elements;
-        _number = json._number;
-        _string = json._string;
-        _type = json._type;
-        _key = json._key;
-        return *this;
+        return (*this = std::move(Clone(json)));
     }
 
     JValue & operator =(JValue && json)
@@ -165,6 +170,7 @@ public:
         _string = std::move(json._string);
         _type = std::move(json._type);
         _key = std::move(json._key);
+        json._type = kNULL;
         return *this;
     }
 
@@ -214,48 +220,62 @@ public:
         return GetImpl(keys...);
     }
 
-    template <class T, class ...Keys>
-    bool Set(const T & val, const Keys & ...keys)
-    {
-        return SetImpl(std::make_shared<JValue>(val), keys...);
-    }
-
     template <class ...Keys>
     bool Set(const char * val, const Keys & ...keys)
     {
-        return SetImpl(std::make_shared<JValue>(val), keys...);
+        return SetImpl(val, keys...);
+    }
+
+    template <class Val, class ...Keys>
+    bool Set(Val && val, const Keys & ...keys)
+    {
+        return SetImpl(std::forward<Val>(val), keys...);
+    }
+
+    template <class ...Keys>
+    void Del(const Keys & ...keys)
+    {
+        DelImpl(keys...);
     }
 
 private:
-    JValue Clone(const JValue jvalue) const
+    JValue Clone(JValue && jvalue) const
+    {
+        return std::move(jvalue);
+    }
+
+    JValue Clone(const JValue & jvalue) const
     {
         JValue newval;
-        //switch (jvalue.Type())
-        //{
-        //case kNUMBER:
-        //    {
-        //        newval.Set(jvalue.ToDouble()); 
-        //        newval.Key = jvalue.Key;
-        //    }
-        //    break;
-        //case kSTRING:
-        //    {
-        //        newval.Set(jvalue.ToString()); 
-        //        newval.Key = jvalue.Key;
-        //    }
-        //    break;
-        //case kHASH:
-        //case kLIST:
-        //    {
-        //        std::transform(std::cbegin(_elements),
-        //                       std::cend(_elements),
-        //                       std::back_inserter(newval._elements),
-        //                       std::bind(&JValue::ClonePtr, this, std::placeholders::_1));
-        //    }
-        //    break;
-        //case kBOOL:
-        //    newval.Set(jvalue.ToBool()); break;
-        //}
+        switch (jvalue.Type())
+        {
+        case kNUMBER:
+            {
+                newval.Set(jvalue.ToDouble()); 
+            }
+            break;
+        case kSTRING:
+            {
+                newval.Set(jvalue.ToString());
+            }
+            break;
+        case kBOOL:
+            {
+                newval.Set(jvalue.ToBool());
+            }
+            break;
+        case kHASH:
+        case kLIST:
+            {
+                std::transform(std::cbegin(_elements),
+                               std::cend(_elements),
+                               std::back_inserter(newval._elements),
+                               std::bind(&JValue::ClonePtr, this, std::placeholders::_1));
+            }
+            break;
+        }
+        newval._key = jvalue.Key();
+        newval._type = jvalue.Type();
         return std::move(newval);
     }
 
@@ -278,116 +298,126 @@ private:
     template <class Key>
     JValuePtr GetImpl(const Key & key)
     {
-        if constexpr (IsJValue<Key>::value)
-        {
-            return key._cjson;
-        }
         if constexpr (IsInteger<Key>::value)
         {
-            return _elements.at(key);
+            return key < _elements.size()
+                ? _elements.at(key)
+                : nullptr;
         }
         if constexpr (IsString<Key>::value)
         {
-            return *std::find(std::begin(_elements), std::end(_elements), key);
+            auto it = std::find(std::begin(_elements), std::end(_elements), key);
+            return it != std::end(_elements)
+                ? *it : nullptr;
         }
         return nullptr;
     }
 
-    template <class Key1, class Key2, class ...Keys>
-    bool SetImpl(cJSON * root, cJSON * val, const Key1 & key1, const Key2 & key2, const Keys & ...keys)
+    template <class Val, class Key, class ...Keys>
+    bool SetImpl(Val && val, const Key & key, const Keys & ...keys)
     {
-        if constexpr (IsJValue<Key1>::value)
+        auto jptr = GetImpl(key);
+        if (jptr != nullptr)
         {
-            return SetImpl(key1._cjson, val, key2, keys...);
+            return jptr->SetImpl(std::forward<Val>(val), keys...);
         }
-        if constexpr (!IsJValue<Key1>::value)
-        {
-            return SetImpl(GetImpl(root, key1), val, key2, keys...);
-        }
+        return true;
     }
 
-    template <class Value, class Key>
-    bool SetImpl(const Value & val, const Key & key)
+    template <class Val, class Key>
+    bool SetImpl(Val && val, const Key & key)
     {
+        assert(Type() == kHASH || Type() == kLIST);
         auto jptr = GetImpl(key);
         if (jptr == nullptr)
         {
+            auto newval = std::make_shared<JValue>(std::forward<Val>(val));
             if constexpr (IsString<Key>::value)
             {
-                auto newval = std::make_shared<JValue>(val);
                 newval->_key = key;
-                _elements.push(newval);
             }
-            if constexpr (IsInteger<Key>::value)
-            {
-                _elements.push(std::make_shared<JValue>(val));
-            }
+            _elements.push_back(newval);
         }
         else
         {
-            jptr* = val;
-        }
-
-        if constexpr (IsInteger<Key>::value)
-        {
-        }
-        if constexpr (IsString<Key>::value)
-        {
-
-        }
-        root = GetImpl(root, key1);
-        if constexpr (IsInteger<Key2>::value)
-        {
-            if (!cJSON_IsArray(root)) { return false; }
-            if (key2 >= cJSON_GetArraySize(root))
-            {
-                cJSON_AddItemToArray(root, val);
-            }
-            else
-            {
-                cJSON_DeleteItemFromArray(root, key2);
-                cJSON_InsertItemInArray(root, key2, val);
-            }
-        }
-        if constexpr (IsString<Key2>::value)
-        {
-            if (!cJSON_IsObject(root)) { return false; }
-            cJSON_DeleteItemFromObject(root, key2.c_str());
-            cJSON_AddItemToObject(root, key2.c_str(), val);
-        }
-        if constexpr (IsCharArr<Key2>::value)
-        {
-            if (!cJSON_IsObject(root)) { return false; }
-            cJSON_DeleteItemFromObject(root, key2);
-            cJSON_AddItemToObject(root, key2, val);
+            jptr->SetImpl(std::forward<Val>(val));
         }
         return true;
     }
 
-    bool SetImpl(const JValuePtr & value)
+    template <class Val>
+    bool SetImpl(Val && val)
     {
+        using Naked = remove_cvref<Val>::type;
 
-        //  TODO
-        //if constexpr (IsInteger<Value>::value || IsNumber<Value>::value)
-        //{
-        //    _type = kNUMBER;
-        //    _number = value;
-        //}
-        //if constexpr (IsString<Value>::value)
-        //{
-        //    _type = kSTRING;
-        //    _string = value;
-        //}
-        //if constexpr (IsBool<Value>::value)
-        //{
-        //    _type = kBOOL;
-        //    _number = value != 0;
-        //}
-        //if constexpr (IsJValue<Value>::value)
-        //{
-        //    *this = value;
-        //}
+        if constexpr (IsNumber<Naked>::value || IsInteger<Naked>::value)
+        {
+            _number = val;
+            _elements.clear();
+            _type = kNUMBER;
+        }
+        if constexpr (IsJValue<Naked>::value)
+        {
+            *this = std::move(Clone(std::forward<Val>(val)));
+        }
+        if constexpr (IsString<Naked>::value)
+        {
+            _string = std::forward<Val>(val);
+            _elements.clear();
+            _type = kSTRING;
+        }
+        if constexpr (IsBool<Naked>::value)
+        {
+            _number = val ? 1 : 0;
+            _elements.clear();
+            _type = kBOOL;
+        }
+        if constexpr (IsHash<Naked>::value)
+        {
+            _elements.clear();
+            _type = kHASH;
+        }
+        if constexpr (IsList<Naked>::value)
+        {
+            _elements.clear();
+            _type = kLIST;
+        }
+        if constexpr (IsNull<Naked>::value)
+        {
+            _elements.clear();
+            _type = kNULL;
+        }
         return true;
+    }
+
+    template <class Key, class ...Keys>
+    void DelImpl(const Key & key, const Keys & ...keys)
+    {
+        auto jptr = GetImpl(key);
+        if (jptr != nullptr)
+        {
+            jptr->Del(keys...);
+        }
+    }
+
+    template <class Key>
+    void DelImpl(const Key & key)
+    {
+        if constexpr (IsInteger<Key>::value)
+        {
+            if (key < _elements.size())
+            {
+                _elements.erase(std::advance(std::begin(_elements), key));
+            }
+        }
+        if constexpr (IsString<Key>::value)
+        {
+            auto it = std::find(std::begin(_elements), std::end(_elements), key);
+            if (it != std::end(_elements)) 
+            { 
+                _elements.erase(it); 
+            }
+        }
     }
 
     const std::string & Print() const;
@@ -408,16 +438,6 @@ inline bool operator==(const JValue::JValuePtr & ptr, const std::string & key)
 }
 
 inline bool operator!=(const JValue::JValuePtr & ptr, const std::string & key)
-{
-    return ptr->Key() != key;
-}
-
-inline bool operator==(const JValue::JValuePtr & ptr, const char * key)
-{
-    return ptr->Key() == key;
-}
-
-inline bool operator!=(const JValue::JValuePtr & ptr, const char * key)
 {
     return ptr->Key() != key;
 }
