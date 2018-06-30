@@ -21,6 +21,13 @@ public:
 
 int main()
 {
+    {
+        auto json = std::move(JValue::FromFile("a.json"));
+        std::cout << json.ToPrint() << std::endl;
+        return 0;
+        //std::cout << "测试从文件序列化到对象: " << time.Time() << std::endl;
+    }
+
     Clock time;
 
     //  测试从字符串序列化到对象
