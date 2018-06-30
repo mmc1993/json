@@ -1,6 +1,4 @@
 #include "json.h"
-#include "sformat.h"
-#include <utility>
 
 const char * JValue::Parser::ParseList(const char * string, std::vector<JValuePtr> * output)
 {
@@ -95,7 +93,7 @@ const char * JValue::Parser::Parse(const char * string, JValue * output)
         string = ParseNumber(string, &output->_number);
         output->_type = kNUMBER;
     }
-    else if (string[0] == 't' && string[1] == 'u' && string[2] == 'r' && string[3] == 'e')
+    else if (string[0] == 't' && string[1] == 'r' && string[2] == 'u' && string[3] == 'e')
     {
         string = ParseTrue(string, &output->_number);
         output->_type = kBOOL;

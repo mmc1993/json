@@ -10,15 +10,11 @@
 #include <type_traits>
 #include "sformat.h"
 
-#ifdef _DEBUG
-
 //  条件判断, 抛出异常
 #define DEBUG_CHECK(exp, type, ...) if (!exp) { throw type(__VA_ARGS__); }
 
 //  异常说明, 显示Json错误位置往后20个字符
 #define DEBUG_EXPINFO(exp, string) SFormat("{0}: {1}", exp, std::string(string).substr(0, 20))
-
-#endif
 
 class JValue {
 public:
