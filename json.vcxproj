@@ -147,13 +147,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\cJSON.c" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\mmcjson.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\cJSON.h" />
     <ClInclude Include="src\json.h" />
+    <ClInclude Include="src\mmcjson.h" />
     <ClInclude Include="src\sformat.h" />
+    <ClInclude Include="src\string_tool.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

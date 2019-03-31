@@ -15,10 +15,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\cJSON.c">
+    <ClCompile Include="src\main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="src\main.cpp">
+    <ClCompile Include="src\mmcjson.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
@@ -30,6 +30,12 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="src\sformat.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="src\mmcjson.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="src\string_tool.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

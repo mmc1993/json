@@ -333,21 +333,21 @@ namespace mmc {
 			_elems.clear();
 			_string = 0 == len ? val
 			: std::string(val, len);
-			_type = Type::kSTRING; 
+			_type = Type::kSTRING;
 		}
 		
 		void Set(const std::double_t val) 
 		{ 
 			_number = val;
 			_elems.clear();
-			_type = Type::kNUMBER; 
+			_type = Type::kNUMBER;
 		}
 
 		void Set(const bool  val) 
 		{ 
 			_number = val ? 1 : 0;
 			_elems.clear();
-			_type = Type::kBOOL; 
+			_type = Type::kBOOL;
 		}
 
 		void Set(const std::uint16_t val) { Set(static_cast<double>(val)); }
