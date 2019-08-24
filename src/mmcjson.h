@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <functional>
 #include <type_traits>
-#include "string_tool.h"
 #include "sformat.h"
 
 //  条件判断, 抛出异常
@@ -228,7 +227,7 @@ namespace mmc {
             std::copy(std::istream_iterator<char>(ifile),
                 std::istream_iterator<char>(),
                 std::back_inserter(buffer));
-            return FromValue(buffer);
+            return FromBuffer(buffer);
         }
 
         //  访问函数
@@ -378,7 +377,7 @@ namespace mmc {
         template <class Key, class ...Keys>
         Value & At(const Key & key, Keys && ... keys)
         {
-            return At(key)->At(std::forward<Keys...>(keys...));
+            return At(key)->At(std::forward<Keys>(keys)...);
         }
 
         template <class Key>
@@ -400,6 +399,11 @@ namespace mmc {
 			return InsertImpl(value, key);
 		}
 
+        Value Insert(const Value & value)
+        {
+            return InsertImpl(value);
+        }
+
     private:
         Value InsertImpl(const Value & value, const char * key)
         {
@@ -420,10 +424,8 @@ namespace mmc {
         Value InsertImpl(const Value & value, size_t idx = (size_t)-1)
         {
             assert(_type == Type::kLIST);
-            auto insert = idx >= _elems.size()
-                ? _elems.insert(_elems.end(), value)
-                : std::next(_elems.begin(), idx);
-            _elems.insert(insert, value);
+            _elems.insert(std::next(
+                _elems.begin(), std::min(idx, _elems.size())), value);
             return shared_from_this();
         }
 
@@ -468,6 +470,16 @@ namespace std {
     }
 
     inline vector<mmc::JsonValue::Child>::iterator end(mmc::JsonValue::Value & json)
+    {   
+        return end(json->GetElements());
+    }
+
+    inline vector<mmc::JsonValue::Child>::iterator begin(const mmc::JsonValue::Value & json)
+    {
+        return begin(json->GetElements());
+    }
+
+    inline vector<mmc::JsonValue::Child>::iterator end(const mmc::JsonValue::Value & json)
     {
         return end(json->GetElements());
     }
